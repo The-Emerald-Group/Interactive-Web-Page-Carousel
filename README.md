@@ -1,8 +1,6 @@
 # 📺 Web Page Carousel
 
-A Docker-based webpage carousel for TV displays. Cycles through a list of URLs at a configurable interval and keeps the screen awake.
-
-[![Docker Hub](https://img.shields.io/docker/pulls/samuelstreets/tv-carousel)](https://hub.docker.com/r/samuelstreets/tv-carousel)
+A Docker-based webpage carousel for displays. Cycles through a list of URLs at a configurable interval and keeps the screen awake.
 
 ---
 
@@ -46,24 +44,7 @@ The app uses two strategies to prevent TV sleep:
 1. **Screen Wake Lock API** — requests a browser wake lock when supported
 2. **Canvas pixel flicker** — periodically mutates a 1×1 invisible canvas to signal activity
 
----
 
-## 🐳 Docker Hub
-
-Image is auto-published to [`samuelstreets/tv-carousel`](https://hub.docker.com/r/samuelstreets/tv-carousel) on every push to `main`.
-
----
-
-## 🔧 GitHub Actions Setup
-
-Add these secrets to your GitHub repo (`Settings → Secrets → Actions`):
-
-| Secret               | Value                          |
-|----------------------|--------------------------------|
-| `DOCKERHUB_USERNAME` | `samuelstreets`                |
-| `DOCKERHUB_TOKEN`    | Your Docker Hub access token   |
-
-Generate a token at: **Docker Hub → Account Settings → Security → New Access Token**
 
 ---
 
@@ -75,5 +56,5 @@ docker run -d \
   -e PAGES="https://example.com,https://wikipedia.org" \
   -e INTERVAL=45 \
   --restart unless-stopped \
-  samuelstreets/tv-carousel:latest
+  samuelstreets/web-page-carousel:latest
 ```
