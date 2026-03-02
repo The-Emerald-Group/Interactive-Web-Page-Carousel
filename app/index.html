@@ -93,22 +93,44 @@
     }
 
     function keepAwake() {
+      // 1. Try standard Wake Lock API (May fail silently without click, but good to have)
+      const requestWakeLock = async () => {
+        if ('wakeLock' in navigator) {
+          try { await navigator.wakeLock.request('screen'); } catch (e) {}
+        }
+      };
+      requestWakeLock();
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) requestWakeLock(); });
+
+      // 2. The "Fake Video Stream" Trick (Requires zero clicks!)
       const canvas = document.createElement('canvas');
       canvas.width = 1; canvas.height = 1;
       canvas.style.cssText = 'position:fixed;top:0;left:0;opacity:0.001;pointer-events:none;z-index:-1';
       document.body.appendChild(canvas);
       const ctx = canvas.getContext('2d');
+      
+      // Update the canvas every second
       setInterval(() => {
-        ctx.fillStyle = `rgb(${Math.floor(Math.random() * 2)},0,0)`;
+        ctx.fillStyle = `rgb(${Math.floor(Math.random() * 255)},0,0)`;
         ctx.fillRect(0, 0, 1, 1);
-      }, 30000);
-      if ('wakeLock' in navigator) {
-        const lock = () => navigator.wakeLock.request('screen').catch(() => {});
-        lock();
-        document.addEventListener('visibilitychange', () => { if (!document.hidden) lock(); });
+      }, 1000);
+
+      // Stream the updating canvas to an invisible, muted video element
+      if (typeof canvas.captureStream === 'function') {
+        const video = document.createElement('video');
+        video.style.cssText = 'position:fixed;top:0;left:0;opacity:0.001;pointer-events:none;z-index:-1';
+        video.muted = true;
+        video.playsInline = true;
+        video.autoplay = true;
+        video.srcObject = canvas.captureStream(1); // 1 frame per second
+        
+        // Muted videos are allowed to autoplay without user interaction
+        video.play().catch(() => {});
+        document.body.appendChild(video);
       }
     }
 
+    // Start everything immediately
     keepAwake();
     showPage(0);
     setInterval(() => {
