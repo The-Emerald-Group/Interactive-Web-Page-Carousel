@@ -6,65 +6,98 @@
   <title>TV Carousel</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      background: #000;
-      width: 100vw;
-      height: 100vh;
-      overflow: hidden;
-      font-family: 'Courier New', monospace;
-    }
-    #splash {
-      position: fixed;
+    body { background: #000; width: 100vw; height: 100vh; overflow: hidden; }
+
+    iframe {
+      position: absolute;
       inset: 0;
-      background: #000;
-      color: #0ff;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      z-index: 9999;
-      gap: 24px;
-    }
-    #splash h1 { font-size: 2rem; letter-spacing: 4px; }
-    #splash p { font-size: 1rem; opacity: 0.6; }
-    #progress-bar {
-      width: 300px;
-      height: 3px;
-      background: rgba(0,255,255,0.2);
-      border-radius: 2px;
-      overflow: hidden;
-    }
-    #progress-fill {
+      width: 100%;
       height: 100%;
-      background: #0ff;
-      width: 0%;
-      transition: width linear;
+      border: none;
+      opacity: 0;
+      transition: opacity 0.6s ease;
+      pointer-events: none;
     }
-    #url-label { font-size: 0.8rem; opacity: 0.5; }
+    iframe.active {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    #overlay {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.75);
+      color: #0ff;
+      padding: 8px 18px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-family: monospace;
+      z-index: 9999;
+      border: 1px solid rgba(0,255,255,0.3);
+      opacity: 0;
+      transition: opacity 0.4s;
+      white-space: nowrap;
+    }
+
+    #progress {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      height: 3px;
+      background: #0ff;
+      z-index: 9999;
+    }
   </style>
 </head>
 <body>
-  <div id="splash">
-    <h1>📺 TV CAROUSEL</h1>
-    <div id="url-label">Loading...</div>
-    <div id="progress-bar"><div id="progress-fill"></div></div>
-    <p id="countdown"></p>
-  </div>
+  <div id="overlay"></div>
+  <div id="progress"></div>
 
   <script src="/config.js"></script>
   <script>
-    const CONFIG = window.CAROUSEL_CONFIG || {
-      pages: ["https://example.com"],
-      interval: 30
-    };
-
+    const CONFIG = window.CAROUSEL_CONFIG || { pages: ["https://example.com"], interval: 30 };
     const pages = CONFIG.pages;
-    const intervalSeconds = parseInt(CONFIG.interval) || 30;
-    let current = 0;
+    const intervalMs = (parseInt(CONFIG.interval) || 30) * 1000;
 
-    const fill = document.getElementById('progress-fill');
-    const urlLabel = document.getElementById('url-label');
-    const countdown = document.getElementById('countdown');
+    const overlay = document.getElementById('overlay');
+    const progress = document.getElementById('progress');
+
+    // Pre-create iframes for all pages
+    const frames = pages.map(url => {
+      const f = document.createElement('iframe');
+      f.src = '/proxy/?url=' + encodeURIComponent(url);
+      f.sandbox = 'allow-scripts allow-same-origin allow-forms allow-popups';
+      document.body.appendChild(f);
+      return f;
+    });
+
+    let current = 0;
+    let startTime = null;
+    let rafId = null;
+
+    function showPage(index) {
+      frames.forEach((f, i) => f.classList.toggle('active', i === index));
+
+      const url = pages[index];
+      overlay.textContent = `${index + 1} / ${pages.length} — ${url}`;
+      overlay.style.opacity = '1';
+      setTimeout(() => overlay.style.opacity = '0', 3000);
+
+      startTime = performance.now();
+      animateProgress();
+    }
+
+    function animateProgress() {
+      if (rafId) cancelAnimationFrame(rafId);
+      function tick() {
+        const pct = Math.min((performance.now() - startTime) / intervalMs * 100, 100);
+        progress.style.width = pct + '%';
+        if (pct < 100) rafId = requestAnimationFrame(tick);
+      }
+      rafId = requestAnimationFrame(tick);
+    }
 
     function keepAwake() {
       const canvas = document.createElement('canvas');
@@ -73,10 +106,9 @@
       document.body.appendChild(canvas);
       const ctx = canvas.getContext('2d');
       setInterval(() => {
-        ctx.fillStyle = `rgb(${Math.floor(Math.random()*2)},0,0)`;
+        ctx.fillStyle = `rgb(${Math.floor(Math.random() * 2)},0,0)`;
         ctx.fillRect(0, 0, 1, 1);
       }, 30000);
-
       if ('wakeLock' in navigator) {
         const lock = () => navigator.wakeLock.request('screen').catch(() => {});
         lock();
@@ -84,42 +116,12 @@
       }
     }
 
-    function showCountdown(seconds, url) {
-      urlLabel.textContent = url;
-      fill.style.transition = 'none';
-      fill.style.width = '0%';
-      requestAnimationFrame(() => {
-        fill.style.transition = `width ${seconds}s linear`;
-        fill.style.width = '100%';
-      });
-
-      let remaining = seconds;
-      countdown.textContent = `Redirecting in ${remaining}s`;
-      const timer = setInterval(() => {
-        remaining--;
-        countdown.textContent = `Redirecting in ${remaining}s`;
-        if (remaining <= 0) clearInterval(timer);
-      }, 1000);
-    }
-
-    function goToPage(index) {
-      current = index % pages.length;
-      const url = pages[current];
-      showCountdown(intervalSeconds, url);
-
-      setTimeout(() => {
-        window.location.href = url;
-      }, intervalSeconds * 1000);
-    }
-
-    // If we've been redirected back (via back button or timeout), figure out next page
-    // Store state in sessionStorage
-    const lastIndex = parseInt(sessionStorage.getItem('carousel_index') || '0');
-    const nextIndex = (lastIndex + 1) % pages.length;
-    sessionStorage.setItem('carousel_index', nextIndex);
-
     keepAwake();
-    goToPage(nextIndex);
+    showPage(0);
+    setInterval(() => {
+      current = (current + 1) % pages.length;
+      showPage(current);
+    }, intervalMs);
   </script>
 </body>
 </html>
