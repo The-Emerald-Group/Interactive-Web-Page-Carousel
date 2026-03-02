@@ -1,12 +1,15 @@
-FROM nginx:alpine
+FROM python:3.12-alpine
 
-# Copy app files
-COPY app/index.html /usr/share/nginx/html/index.html
-COPY app/nginx.conf /etc/nginx/conf.d/default.conf
-COPY app/entrypoint.sh /entrypoint.sh
+WORKDIR /app
 
-RUN chmod +x /entrypoint.sh
+RUN pip install flask requests --break-system-packages
+
+COPY app/index.html /app/index.html
+COPY app/entrypoint.sh /app/entrypoint.sh
+COPY app/server.py /app/server.py
+
+RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 80
 
-ENTRYPOINT ["/entrypoint.sh"]
+CMD ["python", "/app/server.py"]
