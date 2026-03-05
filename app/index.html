@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Web Page Carousel</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    * { margin: 0; padding: 0; box-sizing: border-box; scrollbar-width: none; }
+    *::-webkit-scrollbar { display: none; }
     body { background: #000; width: 100vw; height: 100vh; overflow: hidden; cursor: none; }
     iframe {
       position: absolute;
@@ -19,10 +20,17 @@
     }
     iframe.active {
       opacity: 1;
-      pointer-events: all;
     }
-    /* When paused, disable pointer events on iframes so clicks reach the body */
-    body.paused iframe.active {
+    /* Transparent full-screen layer that always captures clicks */
+    #click-catcher {
+      position: fixed;
+      inset: 0;
+      z-index: 9997;
+      cursor: pointer;
+      background: transparent;
+    }
+    /* Only pass clicks through to iframe when not paused */
+    body:not(.paused) #click-catcher {
       pointer-events: none;
     }
     #overlay {
@@ -94,6 +102,7 @@
   </style>
 </head>
 <body>
+  <div id="click-catcher"></div>
   <div id="overlay"></div>
   <div id="progress"></div>
   <div id="pause-indicator">
@@ -204,14 +213,27 @@
       r.addEventListener('animationend', () => r.remove());
     }
 
-    document.body.addEventListener('click', (e) => {
+    // Click-to-pause: the catcher is on top when paused; use document for play state
+    document.getElementById('click-catcher').addEventListener('click', (e) => {
       spawnRipple(e.clientX, e.clientY);
-      if (isPaused) {
-        resume();
-      } else {
-        pause();
+      resume();
+    });
+
+    // Also support pressing Space or clicking when not paused (document-level)
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        isPaused ? resume() : pause();
       }
     });
+
+    // Capture phase listener so we catch clicks before iframe swallows them
+    document.addEventListener('click', (e) => {
+      if (!isPaused) {
+        spawnRipple(e.clientX, e.clientY);
+        pause();
+      }
+    }, true);
 
     function keepAwake() {
       const requestWakeLock = async () => {
