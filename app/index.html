@@ -8,130 +8,40 @@
     * { margin: 0; padding: 0; box-sizing: border-box; scrollbar-width: none; }
     *::-webkit-scrollbar { display: none; }
     body { background: #000; width: 100vw; height: 100vh; overflow: hidden; cursor: none; }
-    iframe {
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      border: none;
-      opacity: 0;
-      transition: opacity 0.6s ease;
-      pointer-events: none;
-    }
-    iframe.active {
-      opacity: 1;
-    }
-    /* Transparent full-screen layer that always captures clicks */
-    #click-catcher {
-      position: fixed;
-      inset: 0;
-      z-index: 9997;
-      cursor: pointer;
-      background: transparent;
-    }
-    /* Only pass clicks through to iframe when not paused */
-    body:not(.paused) #click-catcher {
-      pointer-events: none;
-    }
+    iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: none; }
     #overlay {
-      position: fixed;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0,0,0,0.75);
-      color: #0ff;
-      padding: 8px 18px;
-      border-radius: 20px;
-      font-size: 13px;
-      font-family: monospace;
-      z-index: 9999;
-      border: 1px solid rgba(0,255,255,0.3);
-      opacity: 0;
-      transition: opacity 0.4s;
-      white-space: nowrap;
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.75); color: #0ff; padding: 8px 18px; border-radius: 20px;
+      font-size: 13px; font-family: monospace; z-index: 9999;
+      border: 1px solid rgba(0,255,255,0.3); opacity: 0; transition: opacity 0.4s; white-space: nowrap;
     }
-    #progress {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      height: 3px;
-      background: #0ff;
-      z-index: 9999;
-      transition: background 0.3s;
-    }
-    body.paused #progress {
-      background: #f80;
-    }
-    /* Pause indicator */
-    #pause-indicator {
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%) scale(0.6);
-      z-index: 10000;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity 0.25s, transform 0.25s;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    #pause-indicator .bar {
-      width: 18px;
-      height: 56px;
-      background: rgba(255,255,255,0.9);
-      border-radius: 4px;
-    }
-    body.paused #pause-indicator {
-      opacity: 1;
-      transform: translate(-50%, -50%) scale(1);
-    }
-    /* Click ripple */
-    .ripple {
-      position: fixed;
-      border-radius: 50%;
-      border: 2px solid rgba(255,255,255,0.6);
-      pointer-events: none;
-      z-index: 9998;
-      animation: ripple-out 0.5s ease-out forwards;
-    }
-    @keyframes ripple-out {
-      from { width: 0; height: 0; opacity: 1; }
-      to   { width: 120px; height: 120px; opacity: 0; }
+    #progress { position: fixed; bottom: 0; left: 0; height: 3px; background: #0ff; z-index: 9999; }
+    #fullscreen-btn {
+      position: fixed; top: 16px; right: 16px; z-index: 10000;
+      background: rgba(0, 0, 0, 0.75); color: #b8ffff; border: 1px solid rgba(0,255,255,0.3);
+      border-radius: 8px; padding: 8px 12px; font-family: monospace; cursor: pointer;
     }
   </style>
 </head>
 <body>
-  <div id="click-catcher"></div>
+  <iframe id="viewer"></iframe>
   <div id="overlay"></div>
   <div id="progress"></div>
-  <div id="pause-indicator">
-    <div class="bar"></div>
-    <div class="bar"></div>
-  </div>
-
-  <script src="/config.js"></script>
+  <button id="fullscreen-btn" type="button">Fullscreen</button>
   <script>
-    const CONFIG = window.CAROUSEL_CONFIG || { pages: ["https://example.com"], interval: 30 };
-    const pages = CONFIG.pages;
-    const intervalMs = (parseInt(CONFIG.interval) || 30) * 1000;
-
+    const viewer = document.getElementById('viewer');
     const overlay = document.getElementById('overlay');
     const progress = document.getElementById('progress');
-
-    const frames = pages.map(url => {
-      const f = document.createElement('iframe');
-      f.src = '/proxy/?url=' + encodeURIComponent(url);
-      document.body.appendChild(f);
-      return f;
-    });
-
+    const fullscreenBtn = document.getElementById('fullscreen-btn');
+    let pages = [];
+    let intervalMs = 30000;
+    let pageTimeoutMs = 15000;
+    let currentVersion = 0;
     let current = 0;
-    let startTime = null;
-    let pausedAt = null;      // elapsed ms when paused
+    let cycleTimerId = null;
+    let pageFailTimerId = null;
     let rafId = null;
-    let intervalId = null;
-    let isPaused = false;
+    let startTime = null;
 
     function showOverlay(text, duration = 3000) {
       overlay.textContent = text;
@@ -140,139 +50,112 @@
       overlay._hideTimer = setTimeout(() => overlay.style.opacity = '0', duration);
     }
 
-    function showPage(index) {
-      frames.forEach((f, i) => f.classList.toggle('active', i === index));
-      showOverlay(`${index + 1} / ${pages.length} — ${pages[index]}`);
-      startTime = performance.now();
-      pausedAt = 0;
-      animateProgress();
-    }
-
     function animateProgress() {
       if (rafId) cancelAnimationFrame(rafId);
       function tick() {
-        if (isPaused) return;
-        const elapsed = (performance.now() - startTime);
-        const pct = Math.min(elapsed / intervalMs * 100, 100);
+        const elapsed = performance.now() - startTime;
+        const pct = Math.min((elapsed / intervalMs) * 100, 100);
         progress.style.width = pct + '%';
         if (pct < 100) rafId = requestAnimationFrame(tick);
       }
       rafId = requestAnimationFrame(tick);
     }
 
-    function scheduleNext() {
-      clearInterval(intervalId);
-      const remaining = intervalMs - (pausedAt || 0);
-      intervalId = setTimeout(() => {
-        current = (current + 1) % pages.length;
-        showPage(current);
-        intervalId = setInterval(() => {
-          current = (current + 1) % pages.length;
-          showPage(current);
-        }, intervalMs);
-      }, remaining);
-    }
-
-    function pause() {
-      isPaused = true;
-      pausedAt = performance.now() - startTime;
-      clearTimeout(intervalId);
-      clearInterval(intervalId);
-      if (rafId) cancelAnimationFrame(rafId);
-      document.body.classList.add('paused');
-      showOverlay('⏸ Paused — click to resume', 99999);
-    }
-
-    function resume() {
-      isPaused = false;
-      // Adjust startTime so elapsed = pausedAt
-      startTime = performance.now() - pausedAt;
-      document.body.classList.remove('paused');
-      showOverlay(`${current + 1} / ${pages.length} — ${pages[current]}`);
-      animateProgress();
-      // Schedule the remainder of this page, then normal cadence
-      const remaining = intervalMs - pausedAt;
-      clearTimeout(intervalId);
-      clearInterval(intervalId);
-      intervalId = setTimeout(() => {
-        current = (current + 1) % pages.length;
-        showPage(current);
-        intervalId = setInterval(() => {
-          current = (current + 1) % pages.length;
-          showPage(current);
-        }, intervalMs);
-      }, remaining);
-    }
-
-    function spawnRipple(x, y) {
-      const r = document.createElement('div');
-      r.className = 'ripple';
-      r.style.left = (x - 60) + 'px';
-      r.style.top  = (y - 60) + 'px';
-      document.body.appendChild(r);
-      r.addEventListener('animationend', () => r.remove());
-    }
-
-    // Click-to-pause: the catcher is on top when paused; use document for play state
-    document.getElementById('click-catcher').addEventListener('click', (e) => {
-      spawnRipple(e.clientX, e.clientY);
-      resume();
-    });
-
-    // Also support pressing Space or clicking when not paused (document-level)
-    document.addEventListener('keydown', (e) => {
-      if (e.code === 'Space') {
-        e.preventDefault();
-        isPaused ? resume() : pause();
-      }
-    });
-
-    // Capture phase listener so we catch clicks before iframe swallows them
-    document.addEventListener('click', (e) => {
-      if (!isPaused) {
-        spawnRipple(e.clientX, e.clientY);
-        pause();
-      }
-    }, true);
-
-    function keepAwake() {
-      const requestWakeLock = async () => {
-        if ('wakeLock' in navigator) {
-          try { await navigator.wakeLock.request('screen'); } catch (e) {}
+    function scheduleFailForward(url) {
+      clearTimeout(pageFailTimerId);
+      pageFailTimerId = setTimeout(() => {
+        if (viewer.src === url) {
+          showOverlay('Page timeout, skipping...', 2000);
+          advancePage();
         }
-      };
-      requestWakeLock();
-      document.addEventListener('visibilitychange', () => { if (!document.hidden) requestWakeLock(); });
+      }, pageTimeoutMs);
+    }
 
-      const canvas = document.createElement('canvas');
-      canvas.width = 1; canvas.height = 1;
-      canvas.style.cssText = 'position:fixed;top:0;left:0;opacity:0.001;pointer-events:none;z-index:-1';
-      document.body.appendChild(canvas);
-      const ctx = canvas.getContext('2d');
-      setInterval(() => {
-        ctx.fillStyle = `rgb(${Math.floor(Math.random() * 255)},0,0)`;
-        ctx.fillRect(0, 0, 1, 1);
-      }, 1000);
+    function loadCurrentPage() {
+      if (!pages.length) {
+        progress.style.width = '0%';
+        showOverlay('No approved pages configured', 5000);
+        return;
+      }
+      const url = pages[current];
+      viewer.src = url;
+      scheduleFailForward(url);
+      startTime = performance.now();
+      animateProgress();
+      showOverlay(`${current + 1} / ${pages.length} — ${url}`);
+    }
 
-      if (typeof canvas.captureStream === 'function') {
-        const video = document.createElement('video');
-        video.style.cssText = 'position:fixed;top:0;left:0;opacity:0.001;pointer-events:none;z-index:-1';
-        video.muted = true;
-        video.playsInline = true;
-        video.autoplay = true;
-        video.srcObject = canvas.captureStream(1);
-        video.play().catch(() => {});
-        document.body.appendChild(video);
+    function advancePage() {
+      if (!pages.length) return;
+      current = (current + 1) % pages.length;
+      loadCurrentPage();
+    }
+
+    function startRotation() {
+      clearInterval(cycleTimerId);
+      loadCurrentPage();
+      cycleTimerId = setInterval(() => {
+        advancePage();
+      }, intervalMs);
+    }
+
+    function arraysEqual(a, b) {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+      return true;
+    }
+
+    async function fetchAndApplyConfig(initial = false) {
+      try {
+        const res = await fetch('/api/public/state', { cache: 'no-store' });
+        if (!res.ok) throw new Error('config fetch failed');
+        const config = await res.json();
+        const nextPages = Array.isArray(config.pages) ? config.pages : [];
+        const nextIntervalMs = (parseInt(config.interval, 10) || 30) * 1000;
+        pageTimeoutMs = Math.max(5000, Math.floor(nextIntervalMs * 0.5));
+        const changed = initial || !arraysEqual(nextPages, pages) || nextIntervalMs !== intervalMs || config.version !== currentVersion;
+        if (!changed) return;
+        pages = nextPages;
+        intervalMs = nextIntervalMs;
+        currentVersion = config.version || Date.now();
+        if (!pages.length || current >= pages.length) current = 0;
+        startRotation();
+        if (!initial) showOverlay('Carousel config updated', 2500);
+      } catch (err) {
+        if (initial) showOverlay('Unable to load config', 5000);
       }
     }
 
-    // Start
-    keepAwake();
-    showPage(0);
-    intervalId = setInterval(() => {
-      current = (current + 1) % pages.length;
-      showPage(current);
-    }, intervalMs);
+    viewer.addEventListener('load', () => {
+      clearTimeout(pageFailTimerId);
+    });
+
+    async function tryFullscreen() {
+      const el = document.documentElement;
+      if (!document.fullscreenElement && el.requestFullscreen) {
+        try {
+          await el.requestFullscreen();
+          fullscreenBtn.style.display = 'none';
+        } catch (e) {
+          fullscreenBtn.style.display = 'block';
+        }
+      }
+    }
+
+    fullscreenBtn.addEventListener('click', tryFullscreen);
+    document.addEventListener('fullscreenchange', () => {
+      fullscreenBtn.style.display = document.fullscreenElement ? 'none' : 'block';
+    });
+
+    window.addEventListener('focus', () => {
+      if (!document.fullscreenElement) {
+        fullscreenBtn.style.display = 'block';
+      }
+    });
+
+    fetchAndApplyConfig(true);
+    setInterval(() => fetchAndApplyConfig(false), 5000);
+    setTimeout(() => { tryFullscreen(); }, 500);
   </script>
 </body>
 </html>

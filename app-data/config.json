@@ -1,0 +1,16 @@
+{
+  "pages": [
+    {
+      "display_url": "https://emerald.ukycm.yeastarcloud.com/cdr_recording/call_report",
+      "login_url": "https://emerald.ukycm.yeastarcloud.com/login",
+      "approved": true
+    },
+    {
+      "display_url": "https://utilitystream.ukycm.yeastarcloud.com/cdr_recording/call_report",
+      "login_url": "https://utilitystream.ukycm.yeastarcloud.com/login",
+      "approved": true
+    }
+  ],
+  "interval": 30,
+  "version": 1776253065519
+}
