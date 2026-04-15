@@ -1,0 +1,89 @@
+services:
+  chrome-kiosk:
+    image: selenium/standalone-chromium:latest
+    user: "0:0"
+    command: sh -lc "rm -f /opt/selenium/assets/chrome-data/SingletonLock /opt/selenium/assets/chrome-data/SingletonSocket /opt/selenium/assets/chrome-data/SingletonCookie; /opt/bin/entry_point.sh"
+    shm_size: "2gb"
+    ports:
+      - "8081:7900"
+    volumes:
+      - chrome_profile:/opt/selenium/assets/chrome-data
+    environment:
+      - SE_VNC_NO_PASSWORD=1
+      - SE_NODE_MAX_SESSIONS=1
+      - SE_NODE_OVERRIDE_MAX_SESSIONS=true
+      - SE_NODE_SESSION_TIMEOUT=86400
+      - SE_SCREEN_WIDTH=1920
+      - SE_SCREEN_HEIGHT=1080
+      - SE_SCREEN_DEPTH=24
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:4444/status >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  page-rotator:
+    image: ghcr.io/the-emerald-group/interactive-web-page-carousel-rotator:latest
+    depends_on:
+      - chrome-kiosk
+    volumes:
+      - carousel_control:/app/control
+    environment:
+      PYTHONUNBUFFERED: "1"
+      DISPLAY_URLS: ""
+      LOGIN_URLS: ""
+      INTERVAL_SECONDS: "30"
+      SELENIUM_URL: http://chrome-kiosk:4444/wd/hub
+      START_FLAG_PATH: /app/control/start_rotation.flag
+      CAPTURE_FLAG_PATH: /app/control/capture_session.flag
+      SESSION_BUNDLE_PATH: /app/control/session_bundle.json
+      TEXT_INJECT_PATH: /app/control/inject_text.txt
+      RESET_LOGIN_TABS_PATH: /app/control/reset_login_tabs.flag
+      READY_FLAG_PATH: /app/control/auth_ready.flag
+      TV_AGENT_URL: http://hybrid-carousel/tv-agent
+      RUNTIME_API_BASE: http://hybrid-carousel
+      AUTO_CAPTURE_SECONDS: "0"
+      TAB_KEEPALIVE_REFRESH_SECONDS: "300"
+      AUTH_DEBUG_PROBE_SECONDS: "20"
+      AUTH_DEBUG_PROBE_ALL_TABS: "0"
+      ENABLE_SELENIUM_ROTATION: "0"
+      FORCE_SELENIUM_FULLSCREEN: "0"
+      OPEN_ALL_LOGIN_TABS_ON_START: "0"
+    restart: unless-stopped
+
+  rotator-control:
+    image: ghcr.io/the-emerald-group/interactive-web-page-carousel-control:latest
+    volumes:
+      - carousel_control:/app/control
+    environment:
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8083:8082"
+    restart: unless-stopped
+
+  hybrid-carousel:
+    image: ghcr.io/the-emerald-group/interactive-web-page-carousel-hybrid:latest
+    volumes:
+      - carousel_control:/app/control:ro
+      - carousel_data:/app/data
+    environment:
+      PAGES: ""
+      INTERVAL: "30"
+      SESSION_BUNDLE_PATH: /app/control/session_bundle.json
+      CONFIG_PATH: /app/data/config.json
+      ADMIN_PASSWORD: "change-me-now"
+      SECRET_KEY: "replace-with-long-random-secret"
+    ports:
+      - "8084:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/carousel-api/public-config >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+volumes:
+  chrome_profile:
+  carousel_control:
+  carousel_data:

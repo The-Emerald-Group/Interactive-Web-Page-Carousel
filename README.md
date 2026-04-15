@@ -48,6 +48,24 @@ cd Web-Page-Carousel-test-upload
 docker compose up -d --build
 ```
 
+## Deploy Stack UI (No Clone on Server)
+
+Use `docker-compose.stack.yml` for Portainer/Deploy Stack style deployment.
+
+1. Push this repo to `main` so GitHub Actions publishes images:
+   - `ghcr.io/the-emerald-group/interactive-web-page-carousel-hybrid:latest`
+   - `ghcr.io/the-emerald-group/interactive-web-page-carousel-rotator:latest`
+   - `ghcr.io/the-emerald-group/interactive-web-page-carousel-control:latest`
+2. In your Docker server UI, create a new stack and paste the contents of `docker-compose.stack.yml`.
+3. Edit at minimum before deploy:
+   - `hybrid-carousel.environment.ADMIN_PASSWORD`
+   - `hybrid-carousel.environment.SECRET_KEY`
+4. Deploy stack.
+5. Open `/admin` and configure/approve pages (URL fields can stay empty in compose).
+
+This path keeps the original `docker-compose.yml` unchanged as a local/source fallback.
+Note: if your Docker server is not logged into GHCR, run `docker login ghcr.io` first (use a token with package read access).
+
 ## Operator Workflow
 
 1. Configure URLs and approval flags in `/admin`.
