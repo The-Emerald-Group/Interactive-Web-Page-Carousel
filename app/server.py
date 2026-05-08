@@ -503,8 +503,11 @@ def tv_control_page():
       }
 
       function updateTargets() {
-        const display = displayPages[displayIdx] || "";
-        displayTargetEl.textContent = display || "-";
+        const loginRow = loginRows[loginIdx] || {};
+        const loginTarget = loginRow.login_url || "";
+        const displayTarget = displayPages[displayIdx] || "";
+        const activeTarget = runtimeMode === "display" ? displayTarget : loginTarget;
+        displayTargetEl.textContent = activeTarget || "-";
         const modeLabel = runtimeMode === "display" ? "display" : "login";
         const rotationLabel = rotationEnabled ? "running" : "stopped";
         rotationStateEl.textContent = modeLabel === "display" ? "Showing live pages" : "Showing login page";

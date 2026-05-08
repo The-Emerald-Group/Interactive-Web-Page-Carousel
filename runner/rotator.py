@@ -969,9 +969,21 @@ def main() -> None:
                                     if target_handle in driver.window_handles:
                                         driver.switch_to.window(target_handle)
                                         suppress_auto_refresh(driver)
+                                        expected_login_url = login_urls[target_idx] if target_idx < len(login_urls) else ""
+                                        if expected_login_url:
+                                            current_after_switch = ensure_expected_display_url(
+                                                driver,
+                                                expected_login_url,
+                                                target_idx,
+                                            )
+                                        else:
+                                            current_after_switch = (driver.current_url or "").strip()
                                         if runtime_fullscreen_lock or force_fullscreen:
                                             ensure_fullscreen(driver)
-                                        log(f"[rotator] applied login command: index={runtime_login_idx}")
+                                        log(
+                                            f"[rotator] applied login command: index={runtime_login_idx}, "
+                                            f"url={current_after_switch}"
+                                        )
                                 last_runtime_nonce = runtime_nonce
                             except Exception as exc:
                                 log(f"[rotator] transient command apply issue: {exc}")
