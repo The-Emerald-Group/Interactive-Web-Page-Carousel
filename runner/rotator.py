@@ -47,7 +47,7 @@ def env_nonnegative_float(name: str, default: float) -> float:
         return default
 
 
-def build_driver(selenium_url: str, launch_app_url: str = "") -> webdriver.Remote:
+def build_driver(selenium_url: str, launch_app_url: str = "", kiosk_mode: bool = False) -> webdriver.Remote:
     options = Options()
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
@@ -56,7 +56,8 @@ def build_driver(selenium_url: str, launch_app_url: str = "") -> webdriver.Remot
     options.add_argument("--ignore-certificate-errors")
     options.add_argument("--disable-gpu")
     options.add_argument("--start-maximized")
-    options.add_argument("--kiosk")
+    if kiosk_mode:
+        options.add_argument("--kiosk")
     options.add_argument("--disable-infobars")
     options.add_argument("--user-data-dir=/opt/selenium/assets/chrome-data")
     options.add_argument("--window-size=1920,1080")
@@ -141,6 +142,25 @@ def ensure_fullscreen(driver: webdriver.Remote) -> None:
         pass
     try:
         driver.set_window_size(1920, 1080)
+    except Exception:
+        pass
+
+
+def exit_fullscreen(driver: webdriver.Remote) -> None:
+    try:
+        window_info = driver.execute_cdp_cmd("Browser.getWindowForTarget", {})
+        window_id = window_info.get("windowId")
+        if window_id is not None:
+            driver.execute_cdp_cmd(
+                "Browser.setWindowBounds",
+                {"windowId": window_id, "bounds": {"windowState": "normal"}},
+            )
+            driver.set_window_size(1280, 900)
+            return
+    except Exception:
+        pass
+    try:
+        driver.set_window_size(1280, 900)
     except Exception:
         pass
 
@@ -784,6 +804,8 @@ def main() -> None:
     open_all_login_tabs_on_start = env_bool("OPEN_ALL_LOGIN_TABS_ON_START", False)
     auth_probe_seconds = env_nonnegative_float("AUTH_DEBUG_PROBE_SECONDS", 90.0)
     auth_probe_all_tabs = env_bool("AUTH_DEBUG_PROBE_ALL_TABS", False)
+    kiosk_mode = env_bool("CHROME_KIOSK_MODE", False)
+    block_login_redirect = env_bool("BLOCK_LOGIN_REDIRECT", False)
 
     # Prefer app-configured URLs over static env URLs so rotator tabs match admin state.
     runtime_cfg = fetch_tv_auth_config(runtime_api_base)
@@ -808,8 +830,9 @@ def main() -> None:
         launch_app_url = ""
         while driver is None:
             try:
-                driver = build_driver(selenium_url, launch_app_url=launch_app_url)
-                install_login_redirect_guard(driver, display_urls)
+                driver = build_driver(selenium_url, launch_app_url=launch_app_url, kiosk_mode=kiosk_mode)
+                if block_login_redirect:
+                    install_login_redirect_guard(driver, display_urls)
             except Exception as exc:
                 log(f"[rotator] Selenium not ready yet: {exc}. Retrying in 3s...")
                 time.sleep(3)
@@ -846,7 +869,8 @@ def main() -> None:
                                 {"display_urls": display_urls, "login_urls": login_urls, "interval": interval_seconds},
                                 sort_keys=True,
                             )
-                            install_login_redirect_guard(driver, display_urls)
+                            if block_login_redirect:
+                                install_login_redirect_guard(driver, display_urls)
                             log(f"[rotator] picked up admin runtime config ({len(display_urls)} page(s))")
                             break
                         time.sleep(2)
@@ -909,7 +933,8 @@ def main() -> None:
                                 login_urls = new_login_urls
                                 interval_seconds = new_interval if new_interval > 0 else interval_seconds
                                 config_signature = new_signature
-                                install_login_redirect_guard(driver, display_urls)
+                                if block_login_redirect:
+                                    install_login_redirect_guard(driver, display_urls)
                                 rebuilt = rebuild_managed_tabs(driver, display_urls, session_bundle)
                                 if rebuilt:
                                     display_handles = rebuilt
@@ -959,6 +984,8 @@ def main() -> None:
                                         current_after_switch = ensure_expected_display_url(driver, expected_url, target_idx)
                                         if runtime_fullscreen_lock or force_fullscreen:
                                             ensure_fullscreen(driver)
+                                        else:
+                                            exit_fullscreen(driver)
                                         log(
                                             f"[rotator] applied display command: index={runtime_display_idx}, url={current_after_switch}"
                                         )
@@ -980,6 +1007,8 @@ def main() -> None:
                                             current_after_switch = (driver.current_url or "").strip()
                                         if runtime_fullscreen_lock or force_fullscreen:
                                             ensure_fullscreen(driver)
+                                        else:
+                                            exit_fullscreen(driver)
                                         log(
                                             f"[rotator] applied login command: index={runtime_login_idx}, "
                                             f"url={current_after_switch}"
