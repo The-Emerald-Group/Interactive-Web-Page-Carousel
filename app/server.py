@@ -16,6 +16,7 @@ _config_path = os.environ.get("CONFIG_PATH", "/app/data/config.json")
 _session_bundle_path = os.environ.get("SESSION_BUNDLE_PATH", "/app/control/session_bundle.json")
 _tv_runtime_path = os.environ.get("TV_RUNTIME_PATH", "/app/data/tv_runtime.json")
 _admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
+_app_version = os.environ.get("APP_VERSION", "dev-local")
 _state_cache = None
 _session_bundle_cache = {}
 _session_bundle_mtime = None
@@ -369,6 +370,21 @@ def tv_control_page():
     }
     .quick-links { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
     .badge { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 12px; border: 1px solid var(--line); background: var(--panel-2); color: #c7e8f9; }
+    .build-id {
+      position: fixed;
+      right: 10px;
+      bottom: 10px;
+      font-family: monospace;
+      font-size: 11px;
+      color: #8fb8cc;
+      border: 1px solid #22333f;
+      background: rgba(8, 14, 18, 0.85);
+      border-radius: 6px;
+      padding: 3px 7px;
+      opacity: 0.75;
+      z-index: 10000;
+      pointer-events: none;
+    }
     @media (max-width: 1180px) {
       .grid { grid-template-columns: 1fr; }
       .viewer-wrap iframe { height: clamp(420px, 62vh, 760px); }
@@ -447,19 +463,29 @@ def tv_control_page():
             <button id="paste-clipboard-btn" class="secondary" type="button">Paste</button>
             <a id="open-stream-url-btn" class="btn secondary" href="#" target="_blank">Open TV URL</a>
           </div>
+          <div class="inline-controls">
+            <strong>Send text</strong>
+            <input id="inject-text-input" type="text" placeholder="Type username/password then Send">
+            <button id="send-text-btn" class="secondary" type="button">Send To Active Field</button>
+          </div>
           <div id="status">Loading config...</div>
         </div>
       </div>
 
       <div class="panel">
         <h3>Live Browser Session (Interactive)</h3>
-        <p class="muted" style="margin-bottom:10px;">Sign in here directly when needed. This controls the same Chromium instance used for TV streaming.</p>
+          <p class="muted" style="margin-bottom:10px;">Sign in here directly when needed. This controls the same Chromium instance used for TV streaming.</p>
+          <div class="quick-links" style="margin-bottom:10px;">
+            <button id="focus-vnc-btn" class="secondary" type="button">Focus VNC Keyboard</button>
+            <a id="open-vnc-btn-2" class="btn secondary" href="#" target="_blank">Open Full VNC (Best for Typing)</a>
+          </div>
         <div class="viewer-wrap">
-          <iframe id="embedded-vnc" allowfullscreen></iframe>
+          <iframe id="embedded-vnc" allowfullscreen tabindex="0"></iframe>
         </div>
       </div>
     </div>
   </div>
+  <div class="build-id">build: """ + _app_version + """</div>
   <script>
     (function () {
       const statusEl = document.getElementById("status");
@@ -475,6 +501,8 @@ def tv_control_page():
       const applyIntervalBtn = document.getElementById("apply-interval-btn");
       const embeddedVnc = document.getElementById("embedded-vnc");
       const openVncBtn = document.getElementById("open-vnc-btn");
+      const openVncBtn2 = document.getElementById("open-vnc-btn-2");
+      const focusVncBtn = document.getElementById("focus-vnc-btn");
       const openDisplayBtn = document.getElementById("open-display-btn");
       const showLoginBtn = document.getElementById("show-login-btn");
       const nextLoginBtn = document.getElementById("next-login-btn");
@@ -487,6 +515,8 @@ def tv_control_page():
       const copyStreamUrlBtn = document.getElementById("copy-stream-url-btn");
       const pasteClipboardBtn = document.getElementById("paste-clipboard-btn");
       const openStreamUrlBtn = document.getElementById("open-stream-url-btn");
+      const sendTextBtn = document.getElementById("send-text-btn");
+      const injectTextInput = document.getElementById("inject-text-input");
       let loginRows = [];
       let displayPages = [];
       let loginIdx = 0;
@@ -607,6 +637,21 @@ def tv_control_page():
         }
       }
 
+      async function sendInjectedText(text, okMessage) {
+        const clean = String(text || "");
+        if (!clean) {
+          setStatus("Nothing to send.");
+          return;
+        }
+        const res = await fetch("/api/tv-runtime/paste", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: clean })
+        });
+        if (!res.ok) throw new Error("text relay failed");
+        setStatus(okMessage || "Sent text to active browser field.");
+      }
+
       async function pasteClipboardToBrowser() {
         try {
           const text = await navigator.clipboard.readText();
@@ -614,15 +659,18 @@ def tv_control_page():
             setStatus("Clipboard is empty.");
             return;
           }
-          const res = await fetch("/api/tv-runtime/paste", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: text })
-          });
-          if (!res.ok) throw new Error("paste relay failed");
-          setStatus("Pasted clipboard text to active browser field.");
+          await sendInjectedText(text, "Pasted clipboard text to active browser field.");
         } catch (e) {
           setStatus("Could not paste. Click into a field in browser view and allow clipboard access.");
+        }
+      }
+
+      async function sendTypedTextToBrowser() {
+        try {
+          const text = injectTextInput.value || "";
+          await sendInjectedText(text, "Sent typed text to active browser field.");
+        } catch (e) {
+          setStatus("Could not send typed text.");
         }
       }
 
@@ -638,6 +686,15 @@ def tv_control_page():
       applyIntervalBtn.addEventListener("click", applyInterval);
       copyStreamUrlBtn.addEventListener("click", copyStreamUrl);
       pasteClipboardBtn.addEventListener("click", pasteClipboardToBrowser);
+      sendTextBtn.addEventListener("click", sendTypedTextToBrowser);
+      focusVncBtn.addEventListener("click", function () {
+        try {
+          embeddedVnc.focus();
+          setStatus("VNC frame focused. Click inside the remote page and type.");
+        } catch (e) {
+          setStatus("Could not focus VNC frame. Use Open Full VNC.");
+        }
+      });
 
       fetch("/api/public/tv-auth-config", { cache: "no-store" })
         .then((res) => res.json())
@@ -661,8 +718,10 @@ def tv_control_page():
       var host = window.location.hostname;
       streamUrlEl.textContent = "http://" + host + ":8084/tv";
       openStreamUrlBtn.href = streamUrlEl.textContent;
-      embeddedVnc.src = "http://" + host + ":8081/vnc.html?autoconnect=1&resize=scale&clip=0&reconnect=1&view_only=0&show_dot=0&quality=9&compression=0";
-      openVncBtn.href = "http://" + host + ":8081/vnc.html?autoconnect=1&resize=scale&clip=0&reconnect=1&view_only=0&show_dot=0&quality=9&compression=0";
+      const interactiveVncUrl = "http://" + host + ":8081/vnc.html?autoconnect=1&resize=remote&view_clip=0&shared=1&reconnect=1&reconnect_delay=500&view_only=0&show_dot=0&quality=9&compression=0";
+      embeddedVnc.src = interactiveVncUrl;
+      openVncBtn.href = interactiveVncUrl;
+      openVncBtn2.href = interactiveVncUrl;
     })();
   </script>
 </body>

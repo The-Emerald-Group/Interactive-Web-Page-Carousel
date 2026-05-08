@@ -416,28 +416,65 @@ def maybe_inject_text(driver: webdriver.Remote, text_flag_path: Path) -> None:
     except Exception:
         text = ""
     try:
-        driver.execute_script(
+        injected = bool(
+            driver.execute_script(
             """
             const text = arguments[0] || "";
-            const el = document.activeElement;
+            const isWritable = (el) => {
+              if (!el) return false;
+              const tag = (el.tagName || "").toLowerCase();
+              if (tag === "textarea") return true;
+              if (tag === "input") {
+                const t = (el.type || "text").toLowerCase();
+                if (["hidden", "button", "submit", "reset", "checkbox", "radio", "file"].includes(t)) return false;
+                return !el.disabled && !el.readOnly;
+              }
+              return !!el.isContentEditable;
+            };
+            const pickFallbackInput = () => {
+              const candidates = Array.from(document.querySelectorAll("input, textarea, [contenteditable='true']"));
+              return candidates.find((el) => {
+                if (!isWritable(el)) return false;
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+              }) || null;
+            };
+            let el = document.activeElement;
+            if (!isWritable(el)) {
+              el = pickFallbackInput();
+              if (el && typeof el.focus === "function") {
+                try { el.focus(); } catch (e) {}
+              }
+            }
             if (!el) return false;
             const tag = (el.tagName || "").toLowerCase();
             if (tag === "input" || tag === "textarea") {
-              el.value = text;
-              el.dispatchEvent(new Event('input', { bubbles: true }));
+              const descriptor = Object.getOwnPropertyDescriptor(el.__proto__, "value")
+                || Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")
+                || Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
+              if (descriptor && typeof descriptor.set === "function") {
+                descriptor.set.call(el, text);
+              } else {
+                el.value = text;
+              }
+              el.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
               el.dispatchEvent(new Event('change', { bubbles: true }));
               return true;
             }
             if (el.isContentEditable) {
               el.textContent = text;
-              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new InputEvent('input', { bubbles: true, data: text, inputType: 'insertText' }));
               return true;
             }
             return false;
             """,
             text,
+        ) or False
         )
-        log("[rotator] injected text into active field")
+        if injected:
+            log("[rotator] injected text into page field")
+        else:
+            log("[rotator] text inject failed: no writable field found")
     except Exception as exc:
         log(f"[rotator] text inject failed: {exc}")
     finally:
@@ -574,6 +611,25 @@ def normalize_url(value: str) -> str:
     return (value or "").strip().rstrip("/")
 
 
+def urls_match_for_display(current_url: str, expected_url: str) -> bool:
+    current_norm = normalize_url(current_url)
+    expected_norm = normalize_url(expected_url)
+    if current_norm == expected_norm:
+        return True
+    current_parsed = urlparse(current_norm)
+    expected_parsed = urlparse(expected_norm)
+    if not current_parsed.scheme or not current_parsed.netloc:
+        return False
+    if not expected_parsed.scheme or not expected_parsed.netloc:
+        return False
+    # Treat any same-origin URL as valid display state to avoid
+    # resetting in-page position/state for SPA-like PBX pages.
+    return (
+        current_parsed.scheme == expected_parsed.scheme
+        and current_parsed.netloc == expected_parsed.netloc
+    )
+
+
 def url_is_login(value: str) -> bool:
     return bool(re.search(r"/login(\b|/|\?|#|$)", value or "", re.IGNORECASE))
 
@@ -670,13 +726,11 @@ def probe_auth_state_active_only(
 
 
 def ensure_expected_display_url(driver: webdriver.Remote, expected_url: str, tab_index: int) -> str:
-    expected_norm = normalize_url(expected_url)
     try:
         current_url = (driver.current_url or "").strip()
     except Exception:
         current_url = ""
-    current_norm = normalize_url(current_url)
-    if expected_norm and (not current_norm or current_norm != expected_norm):
+    if expected_url and (not current_url or not urls_match_for_display(current_url, expected_url)):
         reason = "login drift" if url_is_login(current_url) else "url drift"
         try:
             driver.get(expected_url)
@@ -1050,14 +1104,12 @@ def main() -> None:
                                 try:
                                     driver.switch_to.window(target_handle)
                                     current_url = (driver.current_url or "").strip()
-                                    expected_norm = normalize_url(target_url)
-                                    current_norm = normalize_url(current_url)
                                     should_reopen = False
                                     reason = ""
                                     if url_is_login(current_url):
                                         should_reopen = True
                                         reason = "login page"
-                                    elif expected_norm and current_norm and current_norm != expected_norm:
+                                    elif target_url and (not current_url or not urls_match_for_display(current_url, target_url)):
                                         should_reopen = True
                                         reason = "url drift"
 
